@@ -10,7 +10,12 @@ const routes = [
     component: () => import('@/pages/AuthPage.vue'),
     meta: { hideChrome: true },
   },
-  { path: '/onboarding', name: 'onboarding', component: () => import('@/pages/OnboardingPage.vue') },
+  {
+    path: '/onboarding',
+    name: 'onboarding',
+    component: () => import('@/pages/OnboardingPage.vue'),
+    meta: { hideChrome: true, requiresAuth: true },
+  },
   { path: '/movie/:id', name: 'movie', component: () => import('@/pages/MovieDetailPage.vue') },
   { path: '/watchlist', name: 'watchlist', component: () => import('@/pages/WatchlistPage.vue') },
   { path: '/for-you', name: 'for-you', component: () => import('@/pages/ForYouPage.vue') },
@@ -32,6 +37,9 @@ const router = createRouter({
 
 router.beforeEach((to) => {
   const auth = useAuthStore()
+  if (to.meta.requiresAuth && !auth.isLoggedIn) {
+    return { name: 'login' }
+  }
   if (to.meta.requiresModerator && !auth.isModerator) {
     return { name: 'home' }
   }

@@ -11,7 +11,7 @@ export const login = async (identifier, password) => {
   if (!user || user.password !== password) {
     throw new Error('Invalid username/email or password.')
   }
-  return { username: user.username, role: user.role }
+  return { username: user.username, role: user.role, isNew: user.isNew === true }
 }
 
 export const register = async ({ username, email, password }) => {
@@ -33,6 +33,12 @@ export const register = async ({ username, email, password }) => {
     throw err
   }
   // In-memory only: lost on page refresh (mock)
-  users.push({ username: username.trim(), email: email.trim(), password, role: 'user' })
+  users.push({
+    username: username.trim(),
+    email: email.trim(),
+    password,
+    role: 'user',
+    isNew: true,
+  })
   return { ok: true }
 }
