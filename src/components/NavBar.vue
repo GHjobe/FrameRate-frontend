@@ -60,7 +60,7 @@ function logout() {
       </nav>
 
       <div class="nav__right">
-        <SearchBar />
+        <SearchBar v-if="route.name !== 'search'" />
 
         <template v-if="!auth.isLoggedIn">
           <BaseButton variant="text" @click="router.push({ name: 'login' })">Log In</BaseButton>
