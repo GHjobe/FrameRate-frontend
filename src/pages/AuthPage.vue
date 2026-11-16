@@ -2,6 +2,7 @@
 import { ref, reactive, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { usePreferencesStore } from '@/stores/preferences'
 import { useToastStore } from '@/stores/toast'
 import { login, register } from '@/api/auth'
 import { getPasswordStrength } from '@/utils/passwordStrength'
@@ -12,6 +13,7 @@ import BaseCheckbox from '@/components/BaseCheckbox.vue'
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+const prefs = usePreferencesStore()
 const toast = useToastStore()
 
 // view: 'login' | 'register' | 'blocked' | 'verify'
@@ -44,6 +46,13 @@ const strength = computed(() => getPasswordStrength(regForm.password))
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
+// After "Check your email": go to log in with the new username already filled in
+function backToLogin() {
+  loginForm.identifier = regForm.username.trim()
+  loginForm.password = ''
+  setMode('login')
+}
+
 async function submitLogin() {
   clearErrors()
   if (!loginForm.identifier.trim()) errors.identifier = 'Enter your username or email.'
@@ -55,7 +64,8 @@ async function submitLogin() {
     const user = await login(loginForm.identifier, loginForm.password)
     auth.fakeLogin(user.role, user.username)
     toast.show(`Welcome back, ${user.username}!`)
-    router.push('/')
+    // First login of a new account: set preferences first
+    router.push(user.isNew && !prefs.completed ? '/onboarding' : '/')
   } catch (e) {
     errors.password = e.message
   } finally {
@@ -219,7 +229,7 @@ async function submitRegister() {
           <p class="message__text">
             We sent a verification email to <strong>{{ regForm.email }}</strong>. Open it to finish creating your account.
           </p>
-          <BaseButton variant="secondary" @click="setMode('login')">Back to log in</BaseButton>
+          <BaseButton variant="secondary" @click="backToLogin">Back to log in</BaseButton>
         </div>
       </div>
     </section>
