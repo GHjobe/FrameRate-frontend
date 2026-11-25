@@ -2,10 +2,12 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { usePreferencesStore } from '@/stores/preferences'
+import { useCatalogStore } from '@/stores/catalog'
 import { useToastStore } from '@/stores/toast'
 import { getGenres } from '@/api/movies'
 import { getOnboardingOptions } from '@/api/onboarding'
 import { checkGenre, checkProvider } from '@/utils/validateName'
+import { getCountries, getLanguages } from '@/utils/locales'
 import BaseChip from '@/components/BaseChip.vue'
 import BaseButton from '@/components/BaseButton.vue'
 import BaseDropdown from '@/components/BaseDropdown.vue'
@@ -15,6 +17,7 @@ const MAX_GENRES = 8
 
 const router = useRouter()
 const prefs = usePreferencesStore()
+const catalog = useCatalogStore()
 const toast = useToastStore()
 
 const genreOptions = ref([])
@@ -24,13 +27,11 @@ const languageOptions = ref([])
 
 // start from whatever is already saved in the store
 const genres = ref([...prefs.genres])
-const customGenres = ref([])
 const showOthers = ref(false)
 const otherInput = ref('')
 const error = ref('')
 
 const providers = ref([...prefs.providers])
-const customProviders = ref([])
 const showOtherProvider = ref(false)
 const otherProviderInput = ref('')
 const providerError = ref('')
@@ -40,6 +41,19 @@ const language = ref(prefs.language)
 const blurSpoilers = ref(prefs.blurSpoilers)
 
 const atLimit = computed(() => genres.value.length >= MAX_GENRES)
+
+// built-in list + everything users added before (shared by everyone)
+const allGenres = computed(() => {
+  const base = genreOptions.value
+  const extra = catalog.extraGenres.filter((g) => !base.some((b) => b.toLowerCase() === g.toLowerCase()))
+  return [...base, ...extra]
+})
+
+const allProviders = computed(() => {
+  const base = providerOptions.value
+  const extra = catalog.extraProviders.filter((p) => !base.some((b) => b.toLowerCase() === p.toLowerCase()))
+  return [...base, ...extra]
+})
 
 /* ---------- Genres ---------- */
 function toggleGenre(g) {
@@ -53,18 +67,17 @@ function addCustom() {
   const raw = otherInput.value
   if (!raw.trim()) return
 
-  const { name: value, error: problem } = checkGenre(raw)
+  const { name, error: problem } = checkGenre(raw)
   if (problem) {
     error.value = problem
     return
   }
 
-  // if it matches a genre already in the list, use that one
-  const match = genreOptions.value.find((g) => g.toLowerCase() === value.toLowerCase())
-  const name = match || value
+  const existing = allGenres.value.find((g) => g.toLowerCase() === name.toLowerCase())
+  const finalName = existing || name
 
-  if (genres.value.some((g) => g.toLowerCase() === name.toLowerCase())) {
-    error.value = `"${name}" is already selected.`
+  if (genres.value.some((g) => g.toLowerCase() === finalName.toLowerCase())) {
+    error.value = `"${finalName}" is already selected.`
     otherInput.value = ''
     return
   }
@@ -74,14 +87,10 @@ function addCustom() {
   }
 
   error.value = ''
-  genres.value.push(name)
-  if (!match) customGenres.value.push(name)
+  // new genre: add it for everyone
+  if (!existing) catalog.addGenre(finalName)
+  genres.value.push(finalName)
   otherInput.value = ''
-}
-
-function removeCustom(g) {
-  genres.value = genres.value.filter((x) => x !== g)
-  customGenres.value = customGenres.value.filter((x) => x !== g)
 }
 
 /* ---------- Providers ---------- */
@@ -95,31 +104,26 @@ function addCustomProvider() {
   const raw = otherProviderInput.value
   if (!raw.trim()) return
 
-  const { name: value, error: problem } = checkProvider(raw)
+  const { name, error: problem } = checkProvider(raw)
   if (problem) {
     providerError.value = problem
     return
   }
 
-  // if it matches a provider already in the list, use that one
-  const match = providerOptions.value.find((p) => p.toLowerCase() === value.toLowerCase())
-  const name = match || value
+  const existing = allProviders.value.find((p) => p.toLowerCase() === name.toLowerCase())
+  const finalName = existing || name
 
-  if (providers.value.some((p) => p.toLowerCase() === name.toLowerCase())) {
-    providerError.value = `"${name}" is already selected.`
+  if (providers.value.some((p) => p.toLowerCase() === finalName.toLowerCase())) {
+    providerError.value = `"${finalName}" is already selected.`
     otherProviderInput.value = ''
     return
   }
 
   providerError.value = ''
-  providers.value.push(name)
-  if (!match) customProviders.value.push(name)
+  // new service: add it for everyone
+  if (!existing) catalog.addProvider(finalName)
+  providers.value.push(finalName)
   otherProviderInput.value = ''
-}
-
-function removeCustomProvider(p) {
-  providers.value = providers.value.filter((x) => x !== p)
-  customProviders.value = customProviders.value.filter((x) => x !== p)
 }
 
 /* ---------- Actions ---------- */
@@ -148,13 +152,12 @@ onMounted(async () => {
   const [g, o] = await Promise.all([getGenres(), getOnboardingOptions()])
   genreOptions.value = g
   providerOptions.value = o.providers
-  regionOptions.value = o.regions
-  languageOptions.value = o.languages
-  // saved values that are not in the lists were typed by the user
-  customGenres.value = genres.value.filter((x) => !g.includes(x))
-  showOthers.value = customGenres.value.length > 0
-  customProviders.value = providers.value.filter((x) => !o.providers.includes(x))
-  showOtherProvider.value = customProviders.value.length > 0
+  // all countries and all languages
+  regionOptions.value = getCountries()
+  languageOptions.value = getLanguages()
+  // drop saved picks that are no longer in the lists
+  genres.value = genres.value.filter((x) => allGenres.value.includes(x))
+  providers.value = providers.value.filter((x) => allProviders.value.includes(x))
 })
 
 // placeholder wordmark colors (replace with real logos later)
@@ -182,22 +185,13 @@ const brandColor = {
       <p class="card__hint">Pick 1 to {{ MAX_GENRES }} genres · {{ genres.length }} selected</p>
       <div class="chips">
         <BaseChip
-          v-for="g in genreOptions"
+          v-for="g in allGenres"
           :key="g"
           :selected="genres.includes(g)"
           :disabled="atLimit && !genres.includes(g)"
           @click="toggleGenre(g)"
         >
           {{ g }}
-        </BaseChip>
-        <BaseChip
-          v-for="g in customGenres"
-          :key="g"
-          selected
-          :title="`Remove ${g}`"
-          @click="removeCustom(g)"
-        >
-          {{ g }} ×
         </BaseChip>
         <BaseChip :selected="showOthers" @click="showOthers = !showOthers">Others +</BaseChip>
       </div>
@@ -228,7 +222,7 @@ const brandColor = {
       <p class="card__hint">Select all that you have.</p>
       <div class="tiles">
         <button
-          v-for="p in providerOptions"
+          v-for="p in allProviders"
           :key="p"
           type="button"
           :aria-pressed="providers.includes(p)"
@@ -237,19 +231,6 @@ const brandColor = {
         >
           <span class="tile__name" :style="{ color: brandColor[p] }">{{ p }}</span>
           <span class="tile__mark" aria-hidden="true">{{ providers.includes(p) ? '✓' : '+' }}</span>
-        </button>
-
-        <!-- Providers typed by the user -->
-        <button
-          v-for="p in customProviders"
-          :key="p"
-          type="button"
-          class="tile is-selected"
-          :title="`Remove ${p}`"
-          @click="removeCustomProvider(p)"
-        >
-          <span class="tile__name">{{ p }}</span>
-          <span class="tile__mark" aria-hidden="true">×</span>
         </button>
 
         <button
