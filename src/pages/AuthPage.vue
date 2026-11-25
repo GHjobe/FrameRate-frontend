@@ -1,10 +1,11 @@
 <script setup>
-import { ref, reactive, computed, watch } from 'vue'
+import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { usePreferencesStore } from '@/stores/preferences'
 import { useToastStore } from '@/stores/toast'
 import { login, register } from '@/api/auth'
+import { getMovies } from '@/api/movies'
 import { getPasswordStrength } from '@/utils/passwordStrength'
 import BaseInput from '@/components/BaseInput.vue'
 import BaseButton from '@/components/BaseButton.vue'
@@ -20,6 +21,34 @@ const toast = useToastStore()
 const view = ref(route.query.mode === 'register' ? 'register' : 'login')
 const mode = computed(() => (view.value === 'register' ? 'register' : 'login'))
 const loading = ref(false)
+
+/* ---------- Popular posters for the brand panel ---------- */
+const COLLAGE_SIZE = 6
+const POOL_SIZE = 12
+const posters = ref([])
+
+function shuffle(list) {
+  const a = [...list]
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[a[i], a[j]] = [a[j], a[i]]
+  }
+  return a
+}
+
+onMounted(async () => {
+  try {
+    const all = await getMovies()
+    // most popular = most ratings; keep only movies that have a poster
+    const popular = all
+      .filter((m) => m.poster)
+      .sort((a, b) => (b.ratings || 0) - (a.ratings || 0))
+      .slice(0, POOL_SIZE)
+    posters.value = shuffle(popular).slice(0, COLLAGE_SIZE)
+  } catch {
+    posters.value = []
+  }
+})
 
 watch(
   () => route.query.mode,
@@ -107,7 +136,9 @@ async function submitRegister() {
     <section class="brand">
       <img src="/logo.png" alt="FrameRate" class="brand__logo" />
       <div class="brand__collage" aria-hidden="true">
-        <span v-for="n in 6" :key="n" class="brand__tile" :style="{ '--i': n }" />
+        <span v-for="n in 6" :key="n" class="brand__tile" :style="{ '--i': n }">
+          <img v-if="posters[n - 1]" :src="posters[n - 1].poster" alt="" />
+        </span>
       </div>
       <h1 class="brand__title">
         Rate what you watch.<br />Find what’s <span class="brand__accent">next.</span>
@@ -261,11 +292,19 @@ async function submitRegister() {
   max-width: 420px;
 }
 .brand__tile {
+  display: block;
   aspect-ratio: 2 / 3;
+  overflow: hidden;
   border-radius: var(--radius-md);
   background: var(--color-surface-hover);
   border: 1px solid var(--color-border);
-  opacity: calc(0.4 + var(--i) * 0.1);
+  opacity: calc(0.6 + var(--i) * 0.06);
+}
+.brand__tile img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 .brand__title { font-size: var(--text-2xl); }
 .brand__accent { color: var(--color-primary); }
