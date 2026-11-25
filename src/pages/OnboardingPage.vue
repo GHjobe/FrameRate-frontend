@@ -5,6 +5,7 @@ import { usePreferencesStore } from '@/stores/preferences'
 import { useToastStore } from '@/stores/toast'
 import { getGenres } from '@/api/movies'
 import { getOnboardingOptions } from '@/api/onboarding'
+import { checkGenre, checkProvider } from '@/utils/validateName'
 import BaseChip from '@/components/BaseChip.vue'
 import BaseButton from '@/components/BaseButton.vue'
 import BaseDropdown from '@/components/BaseDropdown.vue'
@@ -32,6 +33,7 @@ const providers = ref([...prefs.providers])
 const customProviders = ref([])
 const showOtherProvider = ref(false)
 const otherProviderInput = ref('')
+const providerError = ref('')
 
 const region = ref(prefs.region)
 const language = ref(prefs.language)
@@ -48,10 +50,21 @@ function toggleGenre(g) {
 }
 
 function addCustom() {
-  const value = otherInput.value.trim()
-  if (!value) return
-  const exists = genres.value.some((g) => g.toLowerCase() === value.toLowerCase())
-  if (exists) {
+  const raw = otherInput.value
+  if (!raw.trim()) return
+
+  const { name: value, error: problem } = checkGenre(raw)
+  if (problem) {
+    error.value = problem
+    return
+  }
+
+  // if it matches a genre already in the list, use that one
+  const match = genreOptions.value.find((g) => g.toLowerCase() === value.toLowerCase())
+  const name = match || value
+
+  if (genres.value.some((g) => g.toLowerCase() === name.toLowerCase())) {
+    error.value = `"${name}" is already selected.`
     otherInput.value = ''
     return
   }
@@ -59,9 +72,10 @@ function addCustom() {
     error.value = `You can pick up to ${MAX_GENRES} genres.`
     return
   }
+
   error.value = ''
-  genres.value.push(value)
-  customGenres.value.push(value)
+  genres.value.push(name)
+  if (!match) customGenres.value.push(name)
   otherInput.value = ''
 }
 
@@ -78,13 +92,28 @@ function toggleProvider(p) {
 }
 
 function addCustomProvider() {
-  const value = otherProviderInput.value.trim()
-  if (!value) return
-  const exists = providers.value.some((p) => p.toLowerCase() === value.toLowerCase())
-  if (!exists) {
-    providers.value.push(value)
-    customProviders.value.push(value)
+  const raw = otherProviderInput.value
+  if (!raw.trim()) return
+
+  const { name: value, error: problem } = checkProvider(raw)
+  if (problem) {
+    providerError.value = problem
+    return
   }
+
+  // if it matches a provider already in the list, use that one
+  const match = providerOptions.value.find((p) => p.toLowerCase() === value.toLowerCase())
+  const name = match || value
+
+  if (providers.value.some((p) => p.toLowerCase() === name.toLowerCase())) {
+    providerError.value = `"${name}" is already selected.`
+    otherProviderInput.value = ''
+    return
+  }
+
+  providerError.value = ''
+  providers.value.push(name)
+  if (!match) customProviders.value.push(name)
   otherProviderInput.value = ''
 }
 
@@ -182,6 +211,8 @@ const brandColor = {
             type="text"
             class="other__input"
             placeholder="Enter a genre..."
+            maxlength="40"
+            @input="error = ''"
             @keydown.enter.prevent="addCustom"
           />
           <button type="button" class="other__add" aria-label="Add genre" @click="addCustom">+</button>
@@ -241,11 +272,15 @@ const brandColor = {
             type="text"
             class="other__input"
             placeholder="Enter a streaming service..."
+            maxlength="40"
+            @input="providerError = ''"
             @keydown.enter.prevent="addCustomProvider"
           />
           <button type="button" class="other__add" aria-label="Add streaming service" @click="addCustomProvider">+</button>
         </div>
       </div>
+
+      <p v-if="providerError" class="error" role="alert">{{ providerError }}</p>
     </section>
 
     <!-- 03 Region -->
