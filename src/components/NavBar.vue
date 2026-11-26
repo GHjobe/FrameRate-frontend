@@ -1,21 +1,29 @@
 <script setup>
-import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { useLocaleStore } from '@/stores/locale'
 import BaseAvatar from './BaseAvatar.vue'
 import BaseButton from './BaseButton.vue'
 import SearchBar from './SearchBar.vue'
 
+/*
+ * Top navigation bar. All visible text goes through locale.t('key'),
+ * so it follows the language chosen by the user (see src/translations/translations.js).
+ * Three versions: guest (Log In / Register), user (avatar menu), moderator (+ Moderation link).
+ */
+
 const auth = useAuthStore()
+const locale = useLocaleStore()
 const route = useRoute()
 const router = useRouter()
 
-const links = [
-  { to: '/', label: 'Discover' },
-  { to: '/for-you', label: 'For You' },
-  { to: '/watchlist', label: 'Watchlist' },
-  { to: '/watch-together', label: 'Watch Together' },
-]
+const links = computed(() => [
+  { to: '/', label: locale.t('nav.discover') },
+  { to: '/for-you', label: locale.t('nav.forYou') },
+  { to: '/watchlist', label: locale.t('nav.watchlist') },
+  { to: '/watch-together', label: locale.t('nav.watchTogether') },
+])
 
 const menuOpen = ref(false)
 const menuRef = ref(null)
@@ -50,12 +58,12 @@ function logout() {
         <img src="/logo.png" alt="FrameRate" />
       </RouterLink>
 
-      <nav class="nav__links" aria-label="Main">
+      <nav class="nav__links" :aria-label="locale.t('nav.main')">
         <RouterLink v-for="l in links" :key="l.to" :to="l.to" class="nav__link" exact-active-class="is-active">
           {{ l.label }}
         </RouterLink>
         <RouterLink v-if="auth.isModerator" to="/moderation" class="nav__link" exact-active-class="is-active">
-          Moderation
+          {{ locale.t('nav.moderation') }}
         </RouterLink>
       </nav>
 
@@ -63,23 +71,23 @@ function logout() {
         <SearchBar v-if="route.name !== 'search'" />
 
         <template v-if="!auth.isLoggedIn">
-          <BaseButton variant="text" @click="router.push({ name: 'login' })">Log In</BaseButton>
-          <BaseButton @click="router.push({ name: 'login', query: { mode: 'register' } })">Register</BaseButton>
+          <BaseButton variant="text" @click="router.push({ name: 'login' })">{{ locale.t('nav.logIn') }}</BaseButton>
+          <BaseButton @click="router.push({ name: 'login', query: { mode: 'register' } })">{{ locale.t('nav.register') }}</BaseButton>
         </template>
 
         <div v-else ref="menuRef" class="nav__menu">
           <button
             type="button"
             class="nav__avatar"
-            aria-label="Account menu"
+            :aria-label="locale.t('nav.accountMenu')"
             :aria-expanded="menuOpen"
             @click="menuOpen = !menuOpen"
           >
             <BaseAvatar :name="auth.user?.username || ''" :size="36" />
           </button>
           <div v-if="menuOpen" class="nav__dropdown" role="menu">
-            <RouterLink to="/profile" class="nav__item" role="menuitem">Profile</RouterLink>
-            <button type="button" class="nav__item" role="menuitem" @click="logout">Log out</button>
+            <RouterLink to="/profile" class="nav__item" role="menuitem">{{ locale.t('nav.profile') }}</RouterLink>
+            <button type="button" class="nav__item" role="menuitem" @click="logout">{{ locale.t('nav.logOut') }}</button>
           </div>
         </div>
       </div>
@@ -124,6 +132,7 @@ function logout() {
   color: var(--color-text-muted);
   font-size: var(--text-sm);
   text-decoration: none;
+  white-space: nowrap;
   border-bottom: 2px solid transparent;
   transition: color 0.15s;
 }
