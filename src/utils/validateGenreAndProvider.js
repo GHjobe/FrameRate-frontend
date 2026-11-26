@@ -1,6 +1,21 @@
-// Checks custom genres and streaming services against lists of real names.
-// Each function returns { name, error }. name is the proper spelling.
+/**
+ * Checks the genres and streaming services that users type in the
+ * "Others" boxes of the Onboarding page.
+ *
+ * A typed name is accepted only if it is in the lists below (not case-sensitive).
+ * This stops random text like "asdfgh" from being added for everyone.
+ *
+ * Exports:
+ *   checkGenre(text)    -> { name, error }
+ *   checkProvider(text) -> { name, error }
+ *   name  = the correct spelling from the list (empty if there is an error)
+ *   error = a message to show the user (empty if the name is OK)
+ *
+ * To accept more names, add them to KNOWN_GENRES or KNOWN_PROVIDERS.
+ * Later, a moderator approval step can handle names that are not in the lists.
+ */
 
+// Letters (any language), numbers, spaces, and & + - . '
 const ALLOWED = /^[\p{L}\p{N} &+\-'.]+$/u
 
 export const KNOWN_GENRES = [
@@ -19,10 +34,12 @@ export const KNOWN_PROVIDERS = [
   'Criterion Channel', 'Starz', 'AMC+', 'BritBox', 'Shudder', 'Vimeo', 'Cignal Play', 'Kocowa',
 ]
 
+// Remove extra spaces
 function normalize(raw) {
   return raw.trim().replace(/\s+/g, ' ')
 }
 
+// Shared checking steps for both genres and providers
 function check(raw, list, label) {
   const v = normalize(raw)
 

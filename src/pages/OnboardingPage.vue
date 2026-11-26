@@ -2,44 +2,86 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { usePreferencesStore } from '@/stores/preferences'
+import { useCatalogStore } from '@/stores/catalog'
+import { useLocaleStore } from '@/stores/locale'
+import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toast'
+import { messages } from '@/translations/translations'
 import { getGenres } from '@/api/movies'
 import { getOnboardingOptions } from '@/api/onboarding'
-import { checkGenre, checkProvider } from '@/utils/validateName'
+import { checkGenre, checkProvider } from '@/utils/validateGenreAndProvider'
+import { getCountries, getLanguages, languageEnglishName } from '@/utils/countriesAndLanguages'
 import BaseChip from '@/components/BaseChip.vue'
 import BaseButton from '@/components/BaseButton.vue'
 import BaseDropdown from '@/components/BaseDropdown.vue'
 import BaseToggle from '@/components/BaseToggle.vue'
 
+/*
+ * Onboarding page: the user picks genres, streaming services, region and language.
+ *
+ * Stores used:
+ *   preferences  - saves what the user picked (genres, providers, region, language)
+ *   catalog      - genres and services added through "Others", shared by all users
+ *   locale       - app language and translations (locale.t('key'))
+ *   auth         - who is logged in (the language is saved per user)
+ *
+ * The language picked here is applied to the app only when the user presses Finish.
+ */
+
 const MAX_GENRES = 8
 
 const router = useRouter()
 const prefs = usePreferencesStore()
+const catalog = useCatalogStore()
+const locale = useLocaleStore()
+const auth = useAuthStore()
 const toast = useToastStore()
+
+// short name for translating text
+const t = (key, params) => locale.t(key, params)
 
 const genreOptions = ref([])
 const providerOptions = ref([])
-const regionOptions = ref([])
-const languageOptions = ref([])
 
-// start from whatever is already saved in the store
+// all languages (shown in their own language) and all countries (in the current app language)
+const languageOptions = getLanguages()
+const regionOptions = computed(() => getCountries(locale.uiLang))
+
+// start from whatever is already saved
 const genres = ref([...prefs.genres])
-const customGenres = ref([])
 const showOthers = ref(false)
 const otherInput = ref('')
 const error = ref('')
 
 const providers = ref([...prefs.providers])
-const customProviders = ref([])
 const showOtherProvider = ref(false)
 const otherProviderInput = ref('')
 const providerError = ref('')
 
 const region = ref(prefs.region)
-const language = ref(prefs.language)
+const language = ref(locale.language) // picked in the dropdown, applied on Finish
 const blurSpoilers = ref(prefs.blurSpoilers)
 
+// do we have translations for the language picked in the dropdown?
+const pickedLanguageSupported = computed(() => Boolean(messages[language.value]))
+
+// English name of the picked language, used in the "no translation" notice
+const languageName = computed(() => languageEnglishName(language.value))
+
 const atLimit = computed(() => genres.value.length >= MAX_GENRES)
+
+// built-in list + everything users added before (shared by everyone)
+const allGenres = computed(() => {
+  const base = genreOptions.value
+  const extra = catalog.extraGenres.filter((g) => !base.some((b) => b.toLowerCase() === g.toLowerCase()))
+  return [...base, ...extra]
+})
+
+const allProviders = computed(() => {
+  const base = providerOptions.value
+  const extra = catalog.extraProviders.filter((p) => !base.some((b) => b.toLowerCase() === p.toLowerCase()))
+  return [...base, ...extra]
+})
 
 /* ---------- Genres ---------- */
 function toggleGenre(g) {
@@ -49,39 +91,35 @@ function toggleGenre(g) {
   else if (!atLimit.value) genres.value.push(g)
 }
 
+// "Others": check the typed genre, then add it to the picks (and to the shared list if it is new)
 function addCustom() {
   const raw = otherInput.value
   if (!raw.trim()) return
 
-  const { name: value, error: problem } = checkGenre(raw)
+  const { name, error: problem } = checkGenre(raw)
   if (problem) {
     error.value = problem
     return
   }
 
-  // if it matches a genre already in the list, use that one
-  const match = genreOptions.value.find((g) => g.toLowerCase() === value.toLowerCase())
-  const name = match || value
+  const existing = allGenres.value.find((g) => g.toLowerCase() === name.toLowerCase())
+  const finalName = existing || name
 
-  if (genres.value.some((g) => g.toLowerCase() === name.toLowerCase())) {
-    error.value = `"${name}" is already selected.`
+  if (genres.value.some((g) => g.toLowerCase() === finalName.toLowerCase())) {
+    error.value = t('onboarding.alreadySelected', { name: locale.genre(finalName) })
     otherInput.value = ''
     return
   }
   if (atLimit.value) {
-    error.value = `You can pick up to ${MAX_GENRES} genres.`
+    error.value = t('onboarding.maxGenres', { max: MAX_GENRES })
     return
   }
 
   error.value = ''
-  genres.value.push(name)
-  if (!match) customGenres.value.push(name)
+  // new genre: add it for everyone
+  if (!existing) catalog.addGenre(finalName)
+  genres.value.push(finalName)
   otherInput.value = ''
-}
-
-function removeCustom(g) {
-  genres.value = genres.value.filter((x) => x !== g)
-  customGenres.value = customGenres.value.filter((x) => x !== g)
 }
 
 /* ---------- Providers ---------- */
@@ -91,41 +129,37 @@ function toggleProvider(p) {
   else providers.value.push(p)
 }
 
+// "Others": same idea as addCustom, but for streaming services
 function addCustomProvider() {
   const raw = otherProviderInput.value
   if (!raw.trim()) return
 
-  const { name: value, error: problem } = checkProvider(raw)
+  const { name, error: problem } = checkProvider(raw)
   if (problem) {
     providerError.value = problem
     return
   }
 
-  // if it matches a provider already in the list, use that one
-  const match = providerOptions.value.find((p) => p.toLowerCase() === value.toLowerCase())
-  const name = match || value
+  const existing = allProviders.value.find((p) => p.toLowerCase() === name.toLowerCase())
+  const finalName = existing || name
 
-  if (providers.value.some((p) => p.toLowerCase() === name.toLowerCase())) {
-    providerError.value = `"${name}" is already selected.`
+  if (providers.value.some((p) => p.toLowerCase() === finalName.toLowerCase())) {
+    providerError.value = t('onboarding.alreadySelected', { name: finalName })
     otherProviderInput.value = ''
     return
   }
 
   providerError.value = ''
-  providers.value.push(name)
-  if (!match) customProviders.value.push(name)
+  // new service: add it for everyone
+  if (!existing) catalog.addProvider(finalName)
+  providers.value.push(finalName)
   otherProviderInput.value = ''
-}
-
-function removeCustomProvider(p) {
-  providers.value = providers.value.filter((x) => x !== p)
-  customProviders.value = customProviders.value.filter((x) => x !== p)
 }
 
 /* ---------- Actions ---------- */
 function finish() {
   if (genres.value.length < 1) {
-    error.value = 'Pick at least 1 genre.'
+    error.value = t('onboarding.pickAtLeastOne')
     return
   }
   prefs.save({
@@ -135,7 +169,9 @@ function finish() {
     language: language.value,
     blurSpoilers: blurSpoilers.value,
   })
-  toast.show('Preferences saved')
+  // apply the picked language to the app now, and remember it for this user
+  locale.setLanguage(language.value, auth.user?.username)
+  toast.show(t('onboarding.saved'))
   router.push('/')
 }
 
@@ -148,13 +184,9 @@ onMounted(async () => {
   const [g, o] = await Promise.all([getGenres(), getOnboardingOptions()])
   genreOptions.value = g
   providerOptions.value = o.providers
-  regionOptions.value = o.regions
-  languageOptions.value = o.languages
-  // saved values that are not in the lists were typed by the user
-  customGenres.value = genres.value.filter((x) => !g.includes(x))
-  showOthers.value = customGenres.value.length > 0
-  customProviders.value = providers.value.filter((x) => !o.providers.includes(x))
-  showOtherProvider.value = customProviders.value.length > 0
+  // drop saved picks that are no longer in the lists
+  genres.value = genres.value.filter((x) => allGenres.value.includes(x))
+  providers.value = providers.value.filter((x) => allProviders.value.includes(x))
 })
 
 // placeholder wordmark colors (replace with real logos later)
@@ -172,50 +204,41 @@ const brandColor = {
   <main class="onboarding">
     <header class="head">
       <img src="/logo.png" alt="FrameRate" class="head__logo" />
-      <h1 class="head__title">WELCOME</h1>
-      <p class="head__sub">Tell us your preferences so we can recommend the best movies and shows just for you.</p>
+      <h1 class="head__title">{{ t('onboarding.welcome') }}</h1>
+      <p class="head__sub">{{ t('onboarding.subtitle') }}</p>
     </header>
 
     <!-- 01 Genres -->
     <section class="card">
-      <h2 class="card__title">01 / Choose your favorite genres</h2>
-      <p class="card__hint">Pick 1 to {{ MAX_GENRES }} genres · {{ genres.length }} selected</p>
+      <h2 class="card__title">{{ t('onboarding.genresTitle') }}</h2>
+      <p class="card__hint">{{ t('onboarding.genresHint', { max: MAX_GENRES, count: genres.length }) }}</p>
       <div class="chips">
         <BaseChip
-          v-for="g in genreOptions"
+          v-for="g in allGenres"
           :key="g"
           :selected="genres.includes(g)"
           :disabled="atLimit && !genres.includes(g)"
           @click="toggleGenre(g)"
         >
-          {{ g }}
+          {{ locale.genre(g) }}
         </BaseChip>
-        <BaseChip
-          v-for="g in customGenres"
-          :key="g"
-          selected
-          :title="`Remove ${g}`"
-          @click="removeCustom(g)"
-        >
-          {{ g }} ×
-        </BaseChip>
-        <BaseChip :selected="showOthers" @click="showOthers = !showOthers">Others +</BaseChip>
+        <BaseChip :selected="showOthers" @click="showOthers = !showOthers">{{ t('onboarding.others') }}</BaseChip>
       </div>
 
       <div v-if="showOthers" class="other">
-        <label class="other__label" for="other-genre">Specify the genre you enjoy</label>
+        <label class="other__label" for="other-genre">{{ t('onboarding.otherGenreLabel') }}</label>
         <div class="other__row">
           <input
             id="other-genre"
             v-model="otherInput"
             type="text"
             class="other__input"
-            placeholder="Enter a genre..."
+            :placeholder="t('onboarding.otherGenrePlaceholder')"
             maxlength="40"
             @input="error = ''"
             @keydown.enter.prevent="addCustom"
           />
-          <button type="button" class="other__add" aria-label="Add genre" @click="addCustom">+</button>
+          <button type="button" class="other__add" :aria-label="t('onboarding.addGenre')" @click="addCustom">+</button>
         </div>
       </div>
 
@@ -224,11 +247,11 @@ const brandColor = {
 
     <!-- 02 Providers -->
     <section class="card">
-      <h2 class="card__title">02 / Where do you watch?</h2>
-      <p class="card__hint">Select all that you have.</p>
+      <h2 class="card__title">{{ t('onboarding.providersTitle') }}</h2>
+      <p class="card__hint">{{ t('onboarding.providersHint') }}</p>
       <div class="tiles">
         <button
-          v-for="p in providerOptions"
+          v-for="p in allProviders"
           :key="p"
           type="button"
           :aria-pressed="providers.includes(p)"
@@ -239,66 +262,56 @@ const brandColor = {
           <span class="tile__mark" aria-hidden="true">{{ providers.includes(p) ? '✓' : '+' }}</span>
         </button>
 
-        <!-- Providers typed by the user -->
-        <button
-          v-for="p in customProviders"
-          :key="p"
-          type="button"
-          class="tile is-selected"
-          :title="`Remove ${p}`"
-          @click="removeCustomProvider(p)"
-        >
-          <span class="tile__name">{{ p }}</span>
-          <span class="tile__mark" aria-hidden="true">×</span>
-        </button>
-
         <button
           type="button"
           :aria-pressed="showOtherProvider"
           :class="['tile', { 'is-selected': showOtherProvider }]"
           @click="showOtherProvider = !showOtherProvider"
         >
-          <span class="tile__name">Others</span>
+          <span class="tile__name">{{ t('onboarding.othersTile') }}</span>
           <span class="tile__mark" aria-hidden="true">+</span>
         </button>
       </div>
 
       <div v-if="showOtherProvider" class="other">
-        <label class="other__label" for="other-provider">Specify where you watch</label>
+        <label class="other__label" for="other-provider">{{ t('onboarding.otherProviderLabel') }}</label>
         <div class="other__row">
           <input
             id="other-provider"
             v-model="otherProviderInput"
             type="text"
             class="other__input"
-            placeholder="Enter a streaming service..."
+            :placeholder="t('onboarding.otherProviderPlaceholder')"
             maxlength="40"
             @input="providerError = ''"
             @keydown.enter.prevent="addCustomProvider"
           />
-          <button type="button" class="other__add" aria-label="Add streaming service" @click="addCustomProvider">+</button>
+          <button type="button" class="other__add" :aria-label="t('onboarding.addProvider')" @click="addCustomProvider">+</button>
         </div>
       </div>
 
       <p v-if="providerError" class="error" role="alert">{{ providerError }}</p>
     </section>
 
-    <!-- 03 Region -->
+    <!-- 03 Region and language -->
     <section class="card">
-      <h2 class="card__title">03 / Which region are you in?</h2>
-      <p class="card__hint">This helps us show the right content and releases for your location.</p>
+      <h2 class="card__title">{{ t('onboarding.regionTitle') }}</h2>
+      <p class="card__hint">{{ t('onboarding.regionHint') }}</p>
       <div class="selects">
-        <BaseDropdown v-model="region" label="Region" :options="regionOptions" />
-        <BaseDropdown v-model="language" label="Language" :options="languageOptions" />
+        <BaseDropdown v-model="region" :label="t('onboarding.region')" :options="regionOptions" />
+        <BaseDropdown v-model="language" :label="t('onboarding.language')" :options="languageOptions" />
       </div>
+      <p v-if="!pickedLanguageSupported" class="notice" role="status">
+        {{ t('onboarding.noTranslation', { language: languageName }) }}
+      </p>
       <div class="toggle-row">
-        <BaseToggle v-model="blurSpoilers" label="Blur spoilers by default" />
+        <BaseToggle v-model="blurSpoilers" :label="t('onboarding.blurSpoilers')" />
       </div>
     </section>
 
     <div class="actions">
-      <BaseButton variant="text" @click="skip">Skip for now</BaseButton>
-      <BaseButton @click="finish">→ Finish</BaseButton>
+      <BaseButton variant="text" @click="skip">{{ t('onboarding.skip') }}</BaseButton>
+      <BaseButton @click="finish">{{ t('onboarding.finish') }}</BaseButton>
     </div>
   </main>
 </template>
@@ -347,6 +360,7 @@ const brandColor = {
 .other__add:hover { background: var(--color-surface-hover); }
 
 .error { margin-top: var(--space-3); color: var(--color-danger); font-size: var(--text-sm); }
+.notice { margin-top: var(--space-3); color: var(--color-primary); font-size: var(--text-sm); }
 
 .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-3); }
 .tile {

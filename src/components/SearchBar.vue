@@ -1,9 +1,16 @@
 <script setup>
 import { ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useLocaleStore } from '@/stores/locale'
+
+/*
+ * Search box used in the navbar. Pressing Enter goes to /search?q=...
+ * The placeholder follows the app language (locale.t).
+ */
 
 const route = useRoute()
 const router = useRouter()
+const locale = useLocaleStore()
 const query = ref(route.query.q || '')
 
 watch(
@@ -29,8 +36,8 @@ function submit() {
       v-model="query"
       type="search"
       class="search__input"
-      placeholder="Search for movies & more"
-      aria-label="Search"
+      :placeholder="locale.t('search.placeholder')"
+      :aria-label="locale.t('search.label')"
     />
   </form>
 </template>
